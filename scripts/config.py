@@ -10,7 +10,7 @@ from pathlib import Path
 
 DEFAULT_PROFILE = {
     "version": 2,
-    "enabled": True,
+    "enabled": False,
     "security_level": "normal",
     "project_types": ["generic"],
     "llm": {
