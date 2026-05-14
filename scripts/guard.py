@@ -245,6 +245,7 @@ def main():
             layer = "rules"
 
         else:
+            decision = "allow"
             reason = "Read-only / safe operation"
             layer = "rules"
 
