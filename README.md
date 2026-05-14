@@ -1,34 +1,115 @@
 # safe-yes
 
-Claude Code 智能命令自动审批插件。自动放行安全操作，拦截危险命令，只把真正需要判断的交给权限弹窗。
+<p align="center">
+  <b>Claude Code 智能命令审批插件</b><br>
+  自动放行安全操作 · 拦截危险命令 · 只把真正需要判断的交给权限弹窗<br>
+  <sub>2.1.1 · MIT · Python 3.12+</sub>
+</p>
 
-[:us: English](#english)
+<p align="center">
+  <a href="README_EN.md">:us: English</a>
+</p>
 
-## 特性
+---
 
-- **四层管道**：Code Rules → Decision Memory → LLM Review → Passthrough，层层过滤
-- **60+ 内置规则**：覆盖常见开发操作（git、npm、pip、docker、文件读写等）
-- **决策记忆**：学习你的审批习惯，相似命令自动复用历史决策
-- **LLM 审查**：不确定的命令交给 AI 判断（可选，需 Anthropic API key）
-- **非侵入式**：只做 auto-allow，不 deny。拿不准的交给 Claude Code 原生权限系统
+## 为什么需要 safe-yes？
 
-## 架构
+Claude Code 的权限弹窗很安全，但**太频繁了**。每次 `ls`、`git status`、`npm test` 都要点一次 Allow，打断心流。safe-yes 帮你自动审批那些"显然安全"的命令，让你只关注真正需要判断的操作。
+
+**核心设计原则：不影响原生权限系统。** safe-yes 是一个"只放行不拦截"的插件——它只会 auto-allow 明显安全的命令，拿不准的统统交给 Claude Code 原生弹窗。你永远不会因为 safe-yes 误判而错失手动审批的机会。
+
+## 如何工作
+
+safe-yes 通过 Claude Code 的 **PreToolUse / PostToolUse Hook** 拦截每一次 Bash 工具调用：
 
 ```
-命令 → Code Rules（60+ 正则规则，<1ms）
-         ├─ yes → 放行
-         ├─ no  → 转给原生权限弹窗
-         └─ maybe ↓
-       Decision Memory（Jaccard 相似度匹配）
-         ├─ match → 复用历史决策
-         └─ miss ↓
-       LLM Review（Anthropic API）
-         ├─ yes/no → 决策 + 写回记忆
-         └─ error ↓
-       Passthrough → 原生权限弹窗
+Bash 命令
+    │
+    ▼
+┌──────────────────────────┐
+│  Layer 1: Code Rules     │  60+ 条编译正则，优先级匹配
+│  速度: < 1ms             │  ├─ yes → 直接放行 ✅
+│  覆盖: git/npm/pip/docker│  ├─ no  → 交给弹窗 ⏳
+│  文件读写/包管理/构建测试│  └─ maybe ↓
+└──────────────────────────┘
+    │
+    ▼
+┌──────────────────────────┐
+│  Layer 2: Decision Memory│  Jaccard 相似度匹配历史决策
+│  速度: < 1ms             │  ├─ 匹配 → 复用你的历史选择 🔄
+│  容量: 最多 5000 条      │  └─ 未命中 ↓
+│  TTL: 默认 30 天         │
+└──────────────────────────┘
+    │
+    ▼
+┌──────────────────────────┐
+│  Layer 3: LLM Review     │  Anthropic API 安全审查
+│  模型: Claude Haiku      │  ├─ yes/no → 决策并写回记忆 🤖
+│  可关闭，无 key 自动跳过  │  └─ 失败/不可用 ↓
+└──────────────────────────┘
+    │
+    ▼
+┌──────────────────────────┐
+│  Layer 4: Passthrough    │  交给 Claude Code 原生弹窗
+│  tolerant: 自动放行      │  → 你手动判断 👤
+│  normal: 弹出原生对话框   │
+└──────────────────────────┘
 ```
+
+### Hook 机制说明
+
+safe-yes 注册了两种 hook：
+
+| Hook | 触发时机 | 作用 |
+|------|---------|------|
+| **PreToolUse** | 工具执行前 | 分析命令，返回 allow 或 passthrough |
+| **PostToolUse** | Bash 执行后 | 检测你手动放行的命令，写入决策记忆 |
+
+**关键：safe-yes 永远只返回 `continue: true`。** 即使判定为危险命令，也只是 passthrough 给原生权限系统——Hook 本身不拒绝任何操作。这就是"yes-only accelerator"的含义。
+
+工具覆盖：
+
+| 工具 | 处理方式 |
+|------|---------|
+| **Bash** | 完整四层管道分析 |
+| **Write / Edit / Read** | 路径安全检查（系统路径、密钥文件、项目范围） |
+| **WebSearch / WebFetch** | 直接放行（只读网络操作） |
+| **mcp__\*** | 直接放行（MCP 工具） |
+| **其他** | 直接放行 |
+
+## 为什么选择 safe-yes？
+
+### vs. 什么都不装
+
+- Claude Code 每次安全的命令都要弹窗 → safe-yes 自动放行 80%+ 的日常操作
+- 没有记忆功能 → safe-yes 学习你的习惯，越用越少弹窗
+
+### vs. 直接配 allowlist
+
+Claude Code 的 `/permission` 只能做简单的命令前缀匹配：
+
+| 能力 | `/permission` | safe-yes |
+|------|:---:|:---:|
+| 命令前缀匹配 | ✅ | ✅ |
+| 正则模式匹配 | ❌ | ✅ 60+ |
+| 上下文感知（路径/参数） | ❌ | ✅ |
+| 历史决策记忆 | ❌ | ✅ |
+| AI 安全审查 | ❌ | ✅ |
+| 文件路径安全检查 | ❌ | ✅ |
+| 引号内容遮蔽 | ❌ | ✅ |
+| 解释器执行体检测 | ❌ | ✅ |
+
+### 特色能力
+
+**引号内容遮蔽** —— `echo "rm -rf /etc"` 不会被误判为危险命令，因为引号内的 `rm -rf /etc` 只是字符串，并非要执行的命令。
+
+**解释器执行体检测** —— `bash -c "rm -rf /etc"` **会被正确识别**为危险命令，因为 `-c` 后面的参数是需要执行的代码。
+
+**Validator 机制** —— `rm *.log` 自动放行，`rm -rf /etc` 转交弹窗，`git push` 自动放行，`git push --force main` 升级到 LLM 审查。
 
 ## 安装
+
+> **注意：安装后需要运行 `/safe-yes:setup` 才能激活。** 默认状态为禁用，避免你不知情的情况下被接管。
 
 ### 方案 A：Marketplace 安装（推荐）
 
@@ -58,6 +139,9 @@ EOF
 # 4. 注册 marketplace 并安装
 claude plugin marketplace add ~/safe-yes-marketplace
 claude plugin install safe-yes@safe-yes-marketplace
+
+# 5. 激活
+# 在 Claude Code 中运行 /safe-yes:setup
 ```
 
 ### 方案 B：快速试用
@@ -65,142 +149,147 @@ claude plugin install safe-yes@safe-yes-marketplace
 ```bash
 git clone https://github.com/matrix1001/safe-yes.git ~/safe-yes
 claude --plugin-dir ~/safe-yes
+# 在 Claude Code 中运行 /safe-yes:setup
 ```
-
-安装后运行 `/safe-yes:setup` 初始化项目配置。
 
 ## 使用
 
 | 命令 | 说明 |
 |------|------|
-| `/safe-yes:setup` | 初始化项目配置，自动检测项目类型 |
-| `/safe-yes:enable` | 启用 guard（开始自动审批） |
-| `/safe-yes:disable` | 禁用 guard（恢复手动审批） |
-| `/safe-yes:status` | 查看统计：决策数、记忆条数、命中率 |
+| `/safe-yes:setup` | 初始化配置，自动检测项目类型，启用 guard |
+| `/safe-yes:enable` | 启用自动审批 |
+| `/safe-yes:disable` | 禁用自动审批（恢复手动弹窗） |
+| `/safe-yes:status` | 查看统计数据：决策总数、记忆条数、命中率 |
 
 ## 配置
 
-配置保存在项目 `.claude/security/profile.json`，由 `/safe-yes:setup` 自动生成。
+配置文件位于项目 `.claude/security/profile.json`，由 `/safe-yes:setup` 自动生成。完整选项：
 
 ```json
 {
   "enabled": true,
   "security_level": "tolerant",
   "llm": {
-    "enabled": true
+    "enabled": true,
+    "api_key": "",
+    "base_url": "",
+    "model": "",
+    "custom_prompt": ""
   },
   "memory": {
     "enabled": true,
     "max_entries": 5000,
     "ttl_days": 30,
     "similarity_threshold": 0.8
-  }
+  },
+  "audit": {
+    "central_log": false,
+    "central_log_path": ""
+  },
+  "custom_rules": [],
+  "network_allowed_domains": []
 }
 ```
 
 ### security_level
 
-| 值 | 行为 |
-|----|------|
-| `tolerant` | 规则无法判断时自动放行（默认） |
-| `normal` | 规则无法判断时交给 Claude Code 弹窗 |
+| 值 | 行为 | 适用场景 |
+|----|------|---------|
+| `tolerant` | 规则无法判断时自动放行（默认） | 日常开发，信任 Claude |
+| `normal` | 规则无法判断时交给弹窗 | 生产环境，需要手动把关 |
 
-### LLM
+### LLM 配置
 
-启用 LLM 审查后，需要配置 API key。safe-yes 会自动读取 Claude Code 的 `ANTHROPIC_AUTH_TOKEN` 环境变量，无需额外配置。也可以手动指定：
+启用 LLM 审查后，safe-yes 自动读取 Claude Code 的 `ANTHROPIC_AUTH_TOKEN` 环境变量，零配置。也可手动指定：
 
 ```json
 {
   "llm": {
     "enabled": true,
-    "api_key": "sk-ant-...",
-    "base_url": "https://api.anthropic.com",
     "model": "claude-haiku-4-5-20251001"
   }
 }
 ```
 
+默认使用 Claude Haiku（快速、低成本）。LLM 不可用时自动降级：`tolerant` → 放行，`normal` → 弹窗。
+
+### 自定义规则
+
+```json
+{
+  "custom_rules": [
+    {
+      "priority": 210,
+      "pattern": "docker exec.*",
+      "decision": "no",
+      "reason": "Docker exec needs manual review"
+    }
+  ]
+}
+```
+
+| priority 范围 | 用途 |
+|--------------|------|
+| 1–99 | 自定义"不信任"规则 |
+| 200–299 | 自定义"信任"规则 |
+
+## 规则清单
+
+safe-yes 内置 60+ 条规则，分两个优先级段：
+
+### 危险操作（P10–P50，匹配后 passthrough 给弹窗）
+
+`dd` 写块设备、进程炸弹、凭证窃取、系统路径递归删除、网络到 shell 管道等。
+
+### 安全操作（P200，匹配后自动放行）
+
+- **只读系统工具**：`ls`、`cat`、`head`、`tail`、`find`、`grep`、`wc`、`du`、`which` 等
+- **Git 查询**：`git status`、`git log`、`git diff`、`git branch` 等
+- **Git 安全写入**：`git add`、`git commit`、`git stash`、`git pull` 等
+- **Lint / Test / Build**：`npm test`、`pytest`、`make`、`cargo build` 等
+- **包管理**：`npm install`、`pip install`、`cargo add` 等
+
+完整列表见 `scripts/rules.py`。
+
+## 决策记忆
+
+safe-yes 会记住你的历史决策。当你手动放行一条命令后，PostToolUse hook 自动将其写入记忆。下次遇到相似命令（关键词 Jaccard 相似度 ≥ 80%），直接复用你的历史选择。
+
+- 含危险词汇（`--force`、`rm -rf`、`drop` 等）的命令不会走记忆层，始终重新判断
+- TTL 30 天自动过期，过期决策不再复用
+- 所有数据存储在**本地** `.claude/security/memory.jsonl`，不上传
+
+## 审计
+
+所有决策记录到 `.claude/security/decisions.jsonl`（JSONL 格式，每行一条）：
+
+```json
+{
+  "timestamp": "2026-05-14T10:30:00.000Z",
+  "command": "git push origin main",
+  "decision": "allow",
+  "reason": "Git push is safe",
+  "layer": "rules",
+  "cwd": "/project",
+  "sid": "abc123"
+}
+```
+
+可选配置集中日志路径，方便团队安全审计。
+
 ## 要求
 
-- Claude Code（任意版本）
-- Python 3.12+
+- **Claude Code**（任意版本）
+- **Python 3.12+**
+
+LLM 审查为可选功能，需要 Anthropic API key（可使用 Claude Code 已有的环境变量）。
+
+## 许可证
+
+MIT
 
 ---
 
-## English
-
-[:cn: 中文](#safe-yes)
-
-**safe-yes** is a Claude Code plugin for smart command auto-approval. It silently allows safe operations (git, npm, pip, file reads), blocks dangerous commands (rm -rf /, dd to block devices, credential exfiltration), and only prompts you for genuinely ambiguous cases.
-
-### How It Works
-
-A four-tier pipeline processes every Bash command before execution:
-
-1. **Code Rules** — 60+ compiled regex rules, matched in priority order (<1ms)
-2. **Decision Memory** — Jaccard similarity matching against your past decisions
-3. **LLM Review** — Optional AI safety review via Anthropic API
-4. **Passthrough** — Falls back to Claude Code's native permission dialog
-
-safe-yes only auto-allows — it never blocks commands on its own. Anything deemed dangerous is passed through to Claude Code's permission system for your manual approval.
-
-### Installation
-
-**Option A: Marketplace (recommended)**
-
-```bash
-mkdir -p ~/safe-yes-marketplace/.claude-plugin ~/safe-yes-marketplace/plugins
-git clone https://github.com/matrix1001/safe-yes.git ~/safe-yes-marketplace/plugins/safe-yes
-cat > ~/safe-yes-marketplace/.claude-plugin/marketplace.json << 'EOF'
-{
-  "name": "safe-yes-marketplace",
-  "owner": {},
-  "plugins": [{
-    "name": "safe-yes",
-    "source": "./plugins/safe-yes",
-    "description": "Smart command auto-approval for Claude Code.",
-    "version": "2.1.1",
-    "category": "productivity",
-    "tags": ["safe-yes", "auto-approve", "security", "permission", "hook"]
-  }]
-}
-EOF
-claude plugin marketplace add ~/safe-yes-marketplace
-claude plugin install safe-yes@safe-yes-marketplace
-```
-
-**Option B: Quick try**
-
-```bash
-git clone https://github.com/matrix1001/safe-yes.git ~/safe-yes
-claude --plugin-dir ~/safe-yes
-```
-
-Run `/safe-yes:setup` after installation to initialize project configuration.
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `/safe-yes:setup` | Initialize project profile |
-| `/safe-yes:enable` | Enable auto-approval |
-| `/safe-yes:disable` | Disable auto-approval |
-| `/safe-yes:status` | Show statistics and status |
-
-### Configuration
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `security_level` | `tolerant` | `tolerant` = auto-allow ambiguous; `normal` = ask |
-| `llm.enabled` | `true` | Enable LLM safety review |
-| `memory.max_entries` | `5000` | Max decision memory entries |
-| `memory.ttl_days` | `30` | Decision memory TTL in days |
-
-### Requirements
-
-- Claude Code
-- Python 3.12+
-
-### License
-
-MIT
+<p align="center">
+  <a href="README_EN.md">:us: Read this in English</a>
+</p>
