@@ -1,0 +1,16 @@
+{
+  "name": "safe-yes",
+  "description": "Smart command auto-approval for Claude Code. Auto-allows safe operations, blocks truly dangerous commands, and only prompts you for genuinely ambiguous cases.",
+  "version": "2.1.1",
+  "author": {
+    "name": "matrix"
+  },
+  "commands": [
+    "./commands/setup.md",
+    "./commands/enable.md",
+    "./commands/disable.md",
+    "./commands/status.md"
+  ],
+  "license": "MIT",
+  "keywords": ["safe-yes", "auto-approve", "security", "permission", "hook", "yes"]
+}
