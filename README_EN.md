@@ -198,20 +198,123 @@ Config is stored at `.claude/security/profile.json` in your project, auto-genera
 | `tolerant` | Auto-allow when rules can't decide (default) | Daily development, trust in Claude |
 | `normal` | Pass to native dialog when uncertain | Production, need manual oversight |
 
-### LLM Review
+### LLM Review (Independent API Call)
 
-Enable LLM review and safe-yes reads `ANTHROPIC_AUTH_TOKEN` from Claude Code's environment automatically — zero config. Or specify manually:
+**Important: LLM review is a completely separate API call from your current Claude Code session.**
+
+safe-yes runs as a Hook script in a subprocess, calling the Anthropic Messages API directly over HTTP. Each review is a **fresh, stateless request** — it cannot see your conversation history, doesn't know what task you're working on, and only receives a fixed system prompt + the current command context.
+
+```
+Your Bash command
+    │
+    ▼
+guard.py (subprocess)
+    │
+    ▼
+HTTP POST /v1/messages ──────► Anthropic API
+    │                              │
+    │   system prompt (fixed)       │
+    │   + user message (context)    │
+    │                              │
+    ◄──── {"decision": "yes"} ────┘
+    │
+    ▼
+allow / passthrough
+```
+
+#### What gets sent to the LLM
+
+**System Prompt** (identical for every request):
+
+<details>
+<summary>Click to expand full system prompt</summary>
+
+```
+You are a command security auditor. Analyze shell commands for safety only.
+Never judge correctness or code quality — only safety.
+
+Return ONLY this JSON (no markdown, no extra text):
+{"decision": "yes|no|uncertain", "reason": "one sentence safety assessment"}
+
+Decision rules:
+
+"yes" — clearly safe:
+  - Read-only: ls, cat, head, tail, find, grep, diff, stat, wc, du, df, which, type, pwd, whoami, env, date, hostname
+  - Safe mutations in project: mkdir, touch, cp, mv, rm (single files), npm/pip/cargo install, git add/commit/checkout/pull/fetch/stash, make, pytest, cargo build/test
+  - Package queries: pip list, npm list, conda list
+  - URL fetches to trusted hosts: curl/wget GET to github.com, pypi.org, npmjs.org, localhost
+  - Python/Node scripts within project directory
+  - Process listing: ps, tasklist, pgrep, pidof
+
+"no" — clearly dangerous (system destruction or credential theft):
+  - Raw disk writes: dd to /dev/sd*, mkfs, fdisk
+  - System root deletion: rm -rf /, rm -rf /etc, rm -rf /usr, del C:\\Windows
+  - Credential exfiltration: cat ~/.ssh/id_rsa, cat ~/.aws/credentials, base64 encode then pipe to remote
+  - Fork bombs, eval with remote input, curl | sh from untrusted URLs
+
+"uncertain" — ambiguous (use for everything else):
+  - Process management: kill, killall, pkill, taskkill, supervisorctl stop/restart
+  - Service control: systemctl, service, docker stop/rm/restart, docker compose down/restart
+  - Permission changes: chmod, chown, icacls, attrib
+  - Git destructive: reset --hard, clean -f, push --force, branch -D
+  - Recursive deletion: rm -rf (project paths), del /s
+  - Network listeners: nc -l, python -m http.server, npx serve
+  - Any command with sudo, or operating outside the project working directory
+  - Any command whose safety depends entirely on context you cannot see
+```
+
+</details>
+
+**User Message** (varies per request, carries command context):
+
+```
+Command: rm -rf ./node_modules/
+Working directory: /home/user/my-project
+Project root: /home/user/my-project
+Project type: node
+Security level: tolerant
+```
+
+**API parameters**: `temperature: 0`, `max_tokens: 256`, `thinking: disabled` (no deep reasoning needed, just fast classification). Default model is `claude-haiku-4-5-20251001`. Credentials are auto-resolved from Claude Code's `ANTHROPIC_AUTH_TOKEN` environment variable.
+
+#### custom_prompt — Project-Specific Safety Rules
+
+The `custom_prompt` field lets you append project-specific safety context. It's **appended to the end** of the system prompt:
+
+**Example 1 — Microservice project, prevent manual pod deletion**:
 
 ```json
 {
   "llm": {
     "enabled": true,
-    "model": "claude-haiku-4-5-20251001"
+    "custom_prompt": "This project runs in production Kubernetes. NEVER allow kubectl delete pod, helm uninstall, or terraform destroy without manual review — classify these as 'no'. Database migration commands (alembic upgrade, python manage.py migrate) should be 'yes' when run in the project root."
   }
 }
 ```
 
-Uses Claude Haiku by default (fast, low cost). Graceful fallback when unavailable: `tolerant` → allow, `normal` → dialog.
+**Example 2 — Data science project, protect raw data**:
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "custom_prompt": "The ./data/raw/ directory contains irreplaceable research data. Any command that writes to or deletes from ./data/raw/ must be classified as 'no'. Jupyter notebook operations and pip install are 'yes'."
+  }
+}
+```
+
+**Example 3 — Frontend project, relax build tooling**:
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "custom_prompt": "This is a Next.js frontend project. Commands like npx create, npx add, npm init, and yarn create are normal development operations — classify as 'yes'. However, any command that modifies .env.local or next.config.js should be 'uncertain'."
+  }
+}
+```
+
+Graceful fallback when LLM is unavailable: `tolerant` → allow, `normal` → dialog.
 
 ### Custom Rules
 

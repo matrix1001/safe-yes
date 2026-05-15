@@ -198,20 +198,123 @@ claude --plugin-dir ~/safe-yes
 | `tolerant` | 规则无法判断时自动放行（默认） | 日常开发，信任 Claude |
 | `normal` | 规则无法判断时交给弹窗 | 生产环境，需要手动把关 |
 
-### LLM 配置
+### LLM 审查（独立 API 调用）
 
-启用 LLM 审查后，safe-yes 自动读取 Claude Code 的 `ANTHROPIC_AUTH_TOKEN` 环境变量，零配置。也可手动指定：
+**重要：LLM 审查是与当前 Claude Code 会话完全独立的 API 调用。**
+
+safe-yes 作为 Hook 脚本在子进程中运行，通过 HTTP 直接调用 Anthropic Messages API。每次审查都是一个**全新的、无状态的请求**——它看不到你的对话历史，不知道你在做什么任务，只接收固定的 system prompt + 当前命令上下文。
+
+```
+你的 Bash 命令
+    │
+    ▼
+guard.py（子进程）
+    │
+    ▼
+HTTP POST /v1/messages ──────► Anthropic API
+    │                              │
+    │   system prompt（固定指令）    │
+    │   + user message（命令上下文）  │
+    │                              │
+    ◄──── {"decision": "yes"} ────┘
+    │
+    ▼
+allow / passthrough
+```
+
+#### 发送给 LLM 的完整内容
+
+**System Prompt**（每次相同的固定指令）：
+
+<details>
+<summary>点击展开完整 system prompt</summary>
+
+```
+You are a command security auditor. Analyze shell commands for safety only.
+Never judge correctness or code quality — only safety.
+
+Return ONLY this JSON (no markdown, no extra text):
+{"decision": "yes|no|uncertain", "reason": "one sentence safety assessment"}
+
+Decision rules:
+
+"yes" — clearly safe:
+  - Read-only: ls, cat, head, tail, find, grep, diff, stat, wc, du, df, which, type, pwd, whoami, env, date, hostname
+  - Safe mutations in project: mkdir, touch, cp, mv, rm (single files), npm/pip/cargo install, git add/commit/checkout/pull/fetch/stash, make, pytest, cargo build/test
+  - Package queries: pip list, npm list, conda list
+  - URL fetches to trusted hosts: curl/wget GET to github.com, pypi.org, npmjs.org, localhost
+  - Python/Node scripts within project directory
+  - Process listing: ps, tasklist, pgrep, pidof
+
+"no" — clearly dangerous (system destruction or credential theft):
+  - Raw disk writes: dd to /dev/sd*, mkfs, fdisk
+  - System root deletion: rm -rf /, rm -rf /etc, rm -rf /usr, del C:\\Windows
+  - Credential exfiltration: cat ~/.ssh/id_rsa, cat ~/.aws/credentials, base64 encode then pipe to remote
+  - Fork bombs, eval with remote input, curl | sh from untrusted URLs
+
+"uncertain" — ambiguous (use for everything else):
+  - Process management: kill, killall, pkill, taskkill, supervisorctl stop/restart
+  - Service control: systemctl, service, docker stop/rm/restart, docker compose down/restart
+  - Permission changes: chmod, chown, icacls, attrib
+  - Git destructive: reset --hard, clean -f, push --force, branch -D
+  - Recursive deletion: rm -rf (project paths), del /s
+  - Network listeners: nc -l, python -m http.server, npx serve
+  - Any command with sudo, or operating outside the project working directory
+  - Any command whose safety depends entirely on context you cannot see
+```
+
+</details>
+
+**User Message**（每次不同，包含当前命令上下文）：
+
+```
+Command: rm -rf ./node_modules/
+Working directory: /home/user/my-project
+Project root: /home/user/my-project
+Project type: node
+Security level: tolerant
+```
+
+**API 参数**：`temperature: 0`，`max_tokens: 256`，`thinking: disabled`（不需要深度思考，只需要快速分类）。默认模型为 `claude-haiku-4-5-20251001`，可自动复用 Claude Code 已有的 `ANTHROPIC_AUTH_TOKEN` 环境变量。
+
+#### custom_prompt — 项目级安全规则
+
+通过 `custom_prompt` 字段，你可以给 LLM 追加项目特有的安全上下文。这段文本会**追加到 system prompt 末尾**：
+
+**示例 1 — 微服务项目，禁止手动重启 Pod**：
 
 ```json
 {
   "llm": {
     "enabled": true,
-    "model": "claude-haiku-4-5-20251001"
+    "custom_prompt": "This project runs in production Kubernetes. NEVER allow kubectl delete pod, helm uninstall, or terraform destroy without manual review — classify these as 'no'. Database migration commands (alembic upgrade, python manage.py migrate) should be 'yes' when run in the project root."
   }
 }
 ```
 
-默认使用 Claude Haiku（快速、低成本）。LLM 不可用时自动降级：`tolerant` → 放行，`normal` → 弹窗。
+**示例 2 — 数据科学项目，保护原始数据**：
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "custom_prompt": "The ./data/raw/ directory contains irreplaceable research data. Any command that writes to or deletes from ./data/raw/ must be classified as 'no'. Jupyter notebook operations and pip install are 'yes'."
+  }
+}
+```
+
+**示例 3 — 前端项目，放宽构建工具**：
+
+```json
+{
+  "llm": {
+    "enabled": true,
+    "custom_prompt": "This is a Next.js frontend project. Commands like npx create, npx add, npm init, and yarn create are normal development operations — classify as 'yes'. However, any command that modifies .env.local or next.config.js should be 'uncertain'."
+  }
+}
+```
+
+LLM 不可用时自动降级：`tolerant` → 放行，`normal` → 弹窗。
 
 ### 自定义规则
 
