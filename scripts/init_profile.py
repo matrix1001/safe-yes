@@ -30,17 +30,18 @@ def detect_project_root(start_path: str = ".") -> str:
     markers = [
         ".git", "package.json", "pyproject.toml", "Cargo.toml",
         "go.mod", "pom.xml", "build.gradle", "Makefile", "CMakeLists.txt",
-        ".claude", "setup.py", "setup.cfg", "composer.json",
+        "setup.py", "setup.cfg", "composer.json",
     ]
+    home = Path.home()
     current = Path(start_path).resolve()
     while True:
         for marker in markers:
             if (current / marker).exists():
                 return str(current)
-        parent = current.parent
-        if parent == current:
+        # Stop walking at home or filesystem root — don't create profiles there
+        if current == home or current.parent == current:
             break
-        current = parent
+        current = current.parent
     return str(Path(start_path).resolve())
 
 
