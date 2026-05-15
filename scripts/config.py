@@ -41,7 +41,7 @@ DEFAULT_PROFILE = {
 _cache = {}
 
 
-def _migrate_v1(profile: dict) -> dict:
+def migrate_v1(profile: dict) -> dict:
     """Migrate v1 profile to v2 format."""
     if profile.get("version", 1) >= 2:
         return profile
@@ -69,8 +69,8 @@ def _migrate_v1(profile: dict) -> dict:
         "llm": {
             "enabled": llm.get("enabled", False),
             "api_key": llm.get("api_key", ""),
-            "base_url": llm.get("base_url", "https://api.openai.com/v1"),
-            "model": llm.get("model", "gpt-4o-mini"),
+            "base_url": llm.get("base_url", ""),
+            "model": llm.get("model", ""),
             "custom_prompt": llm.get("custom_prompt", ""),
         },
         "custom_rules": custom_rules,
@@ -107,8 +107,8 @@ def load_profile(cwd: str) -> dict:
     if profile_path.exists():
         try:
             overlay = json.loads(profile_path.read_text(encoding='utf-8'))
-            overlay = _migrate_v1(overlay)
-            profile = _deep_merge(profile, overlay)
+            overlay = migrate_v1(overlay)
+            profile = deep_merge(profile, overlay)
         except (json.JSONDecodeError, OSError):
             pass
 
@@ -122,12 +122,12 @@ def load_profile(cwd: str) -> dict:
     return profile
 
 
-def _deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict) -> dict:
     """Recursively merge override into base. Nested dicts are merged; everything else is replaced."""
     result = dict(base)
     for key, val in override.items():
         if key in result and isinstance(result[key], dict) and isinstance(val, dict):
-            result[key] = _deep_merge(result[key], val)
+            result[key] = deep_merge(result[key], val)
         else:
             result[key] = val
     return result

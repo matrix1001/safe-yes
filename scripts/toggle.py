@@ -5,13 +5,6 @@ import json
 import sys
 from pathlib import Path
 
-_script_dir = str(Path(__file__).resolve().parent)
-if _script_dir not in sys.path:
-    sys.path.insert(0, _script_dir)
-
-from config import DEFAULT_PROFILE
-
-
 def toggle(enable: bool, cwd: Path):
     profile_path = cwd.resolve() / ".claude" / "security" / "profile.json"
 
@@ -22,10 +15,14 @@ def toggle(enable: bool, cwd: Path):
             print("ERROR: profile.json is corrupt", file=sys.stderr)
             sys.exit(1)
     else:
-        # No profile yet — create from defaults
-        profile = dict(DEFAULT_PROFILE)
-        profile["project_root"] = str(cwd.resolve())
-        profile["created_by"] = "safe-yes/toggle"
+        # No profile yet — create minimal one (load_profile() fills DEFAULT_PROFILE at runtime)
+        profile = {
+            "version": 2,
+            "enabled": enable,
+            "project_root": str(cwd.resolve()),
+            "project_types": ["generic"],
+            "created_by": "safe-yes/toggle",
+        }
 
     profile["enabled"] = enable
     profile_path.parent.mkdir(parents=True, exist_ok=True)

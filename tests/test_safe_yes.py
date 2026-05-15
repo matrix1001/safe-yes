@@ -497,6 +497,69 @@ def main():
         else:
             print(f"  [FAIL] [TOGGLE] profile enabled={profile.get('enabled')}")
 
+    # -- Setup Re-Run Preservation Test --
+    print("\n-- Setup Re-Run Preservation --")
+    with tempfile.TemporaryDirectory() as rtmpdir:
+        setup_script = str(PROJECT_ROOT / "scripts" / "init_profile.py")
+        rsec = Path(rtmpdir) / ".claude" / "security"
+        rsec.mkdir(parents=True)
+
+        # Create existing profile with custom settings
+        existing = {
+            "version": 2, "enabled": True, "security_level": "normal",
+            "project_root": rtmpdir, "project_types": ["node"],
+            "llm": {"enabled": True, "api_key": "sk-custom", "model": "claude-sonnet",
+                    "custom_prompt": "old prompt"},
+            "memory": {"enabled": False, "max_entries": 100,
+                       "ttl_days": 7, "similarity_threshold": 0.5},
+            "audit": {"central_log": True, "central_log_path": "/var/log"},
+            "custom_rules": [{"priority": 205, "pattern": "npm run deploy",
+                              "decision": "no", "reason": "custom block"}],
+            "network_allowed_domains": ["internal.api"],
+        }
+        (rsec / "profile.json").write_text(json.dumps(existing))
+
+        # Re-run setup with new choices
+        setup_input = json.dumps({
+            "project_root": rtmpdir, "security_level": "tolerant",
+            "custom_prompt": "new prompt", "enabled": False,
+        })
+        r = subprocess.run(
+            [PYTHON, setup_script, "--apply"],
+            input=setup_input, capture_output=True, text=True, timeout=10,
+            cwd=rtmpdir,
+        )
+
+        total += 1
+        if r.returncode != 0:
+            print(f"  [FAIL] [SETUP-PRESERVE] setup re-run failed: {r.stderr[:200]}")
+        else:
+            result = json.loads(r.stdout)
+            profile_after = json.loads((rsec / "profile.json").read_text(encoding="utf-8"))
+
+            # Check that user's explicit choices were applied
+            ok = True
+            ok = ok and (profile_after.get("enabled") is False)
+            ok = ok and (profile_after.get("security_level") == "tolerant")
+            ok = ok and (profile_after.get("llm", {}).get("custom_prompt") == "new prompt")
+
+            # Check that custom settings were preserved
+            ok = ok and (profile_after.get("llm", {}).get("api_key") == "sk-custom")
+            ok = ok and (profile_after.get("llm", {}).get("model") == "claude-sonnet")
+            ok = ok and (profile_after.get("memory", {}).get("enabled") is False)
+            ok = ok and (profile_after.get("memory", {}).get("max_entries") == 100)
+            ok = ok and (profile_after.get("memory", {}).get("ttl_days") == 7)
+            ok = ok and (profile_after.get("audit", {}).get("central_log") is True)
+            ok = ok and (profile_after.get("audit", {}).get("central_log_path") == "/var/log")
+            ok = ok and (len(profile_after.get("custom_rules", [])) == 1)
+            ok = ok and (profile_after.get("network_allowed_domains") == ["internal.api"])
+
+            if ok:
+                print("  [PASS] [SETUP-PRESERVE] all custom settings survived re-setup")
+                passed += 1
+            else:
+                print(f"  [FAIL] [SETUP-PRESERVE] profile={json.dumps(profile_after, indent=2)[:500]}")
+
     # -- match_rules() unit tests --
     print("\n-- match_rules() Unit Tests --")
     try:

@@ -23,7 +23,7 @@ _script_dir = str(Path(__file__).resolve().parent)
 if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
-from config import _deep_merge
+from config import deep_merge, migrate_v1
 
 
 def detect_project_type(project_root: str) -> list:
@@ -47,7 +47,7 @@ def detect_project_type(project_root: str) -> list:
 def generate_profile(project_root: str, project_types: list,
                      security_level: str = "normal",
                      custom_prompt: str = "",
-                     enabled: bool = True) -> dict:
+                     enabled: bool = False) -> dict:
     """Build a minimal profile with only the user's explicit setup choices.
     Other sections (memory, audit, custom_rules, etc.) are left out so
     deep_merge preserves any existing customizations from a prior profile."""
@@ -104,11 +104,12 @@ def cmd_apply():
         # Deep merge: existing customizations preserved, new choices override
         try:
             existing = json.loads(profile_path.read_text(encoding="utf-8"))
+            existing = migrate_v1(existing)
         except (json.JSONDecodeError, OSError):
             existing = {}
         new_profile = generate_profile(project_root, project_types, security_level, custom_prompt, enabled)
         # existing as base, new on top → new choices win for enabled/level/prompt
-        profile = _deep_merge(existing, new_profile)
+        profile = deep_merge(existing, new_profile)
     else:
         profile = generate_profile(project_root, project_types, security_level, custom_prompt, enabled)
 

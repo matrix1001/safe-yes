@@ -158,7 +158,7 @@ def status(tail=None):
         hints.append("Hook not registered — run /safe-yes:setup first.")
     if not out.get("profile_exists"):
         hints.append("No profile — run /safe-yes:setup to create one.")
-    if out.get("profile_exists") and not out.get("enabled", True):
+    if out.get("profile_exists") and not out["enabled"]:
         hints.append("Guard is disabled — run /safe-yes:enable to activate.")
 
     # ── Layer breakdown ──
