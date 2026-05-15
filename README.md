@@ -107,6 +107,35 @@ Claude Code 的 `/permission` 只能做简单的命令前缀匹配：
 
 **Validator 机制** —— `rm *.log` 自动放行，`rm -rf /etc` 转交弹窗，`git push` 自动放行，`git push --force main` 升级到 LLM 审查。
 
+## 同类项目对比
+
+如果你在评估不同的 Claude Code 权限自动化方案，这里是与其他主流方案的对比：
+
+| 特性 | **safe-yes** | nyolo | dippy/rippy | vibesafu | cc-approve | omamori |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| 语言 | Python | JS | Python/Rust | TypeScript | JS | Rust |
+| 规则数 | 60+ | 35 | 50–130+ | 不明 | 底层的 | ~10 |
+| 解析方式 | regex + 引号遮蔽 | regex | **AST** | regex | regex | regex + PATH shim |
+| LLM 审查 | ✅ Haiku | ❌ | ❌ | ✅ Haiku+Sonnet | ✅ GPT-4o | ❌ |
+| 决策记忆 | ✅ Jaccard | ❌ | ❌ | ❌ | ✅ 简单缓存 | ❌ |
+| 文件路径检查 | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
+| 解释器执行体检测 | ✅ | ❌ | ✅ 天然 | ❌ | ❌ | ❌ |
+| PostToolUse 学习 | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 安全级别 | tolerant/normal | 单一 | 单一 | 多层 | tolerant/normal | 单一 |
+| 审计日志 | ✅ JSONL | ❌ | ❌ | ❌ | ❌ | ✅ HMAC |
+| 自定义 LLM prompt | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| 安装 | marketplace | npm -g | cargo/pip | npm -g | npm -g | brew |
+| 平台 | 全平台 | 全平台 | 全平台 | 全平台 | 全平台 | macOS |
+
+**safe-yes 的独特定位**：
+
+- **只放行不拦截** —— 唯一采用 "yes-only accelerator" 理念的方案。最危险的情况也只是 passthrough 给原生弹窗，永不会因误判而阻止用户操作
+- **从用户行为中学习** —— 唯一同时使用 PreToolUse + PostToolUse hook 的方案。当你手动放行一条命令，下次自动记住
+- **Validator 上下文感知** —— 唯一在 regex 规则层做上下文判断的方案：`git push` 放行，`git push --force main` 升级 LLM 审查
+- **高频命令自动升级** —— 记忆命中 5 次的命令自动写入 project rules，此后跳过记忆和 LLM 层，极致速度
+
+如果你追求 AST 级精确解析（区分 `echo "rm -rf /"` 和 `bash -c "rm -rf /"`），可关注 [dippy](https://github.com/hesreallyhim/awesome-claude-code/issues/442) 和 [rippy](https://github.com/mpecan/rippy)。如果你需要 macOS 系统级的拦截 + 防 AI 绕过，可关注 [omamori](https://github.com/yottayoshida/omamori)。如果你想要双层 LLM 深度审查，可关注 [vibesafu](https://www.npmjs.com/package/vibesafu)。
+
 ## 安装
 
 > **注意：安装后需要运行 `/safe-yes:setup` 才能激活。** 默认状态为禁用，避免你不知情的情况下被接管。

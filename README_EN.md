@@ -107,6 +107,35 @@ Claude Code's `/permission` only does simple prefix matching:
 
 **Validator pipeline** — `rm *.log` auto-allowed, `rm -rf /etc` passed to dialog, `git push` auto-allowed, `git push --force main` escalated to LLM review.
 
+## Comparison with Alternatives
+
+If you're evaluating different Claude Code permission automation tools:
+
+| Feature | **safe-yes** | nyolo | dippy/rippy | vibesafu | cc-approve | omamori |
+|------|:---:|:---:|:---:|:---:|:---:|:---:|
+| Language | Python | JS | Python/Rust | TypeScript | JS | Rust |
+| Rules | 60+ | 35 | 50–130+ | unclear | basic | ~10 |
+| Parsing | regex + quote mask | regex | **AST** | regex | regex | regex + PATH shim |
+| LLM review | ✅ Haiku | ❌ | ❌ | ✅ Haiku+Sonnet | ✅ GPT-4o | ❌ |
+| Decision memory | ✅ Jaccard | ❌ | ❌ | ❌ | ✅ simple cache | ❌ |
+| File path check | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ |
+| Interpreter detection | ✅ | ❌ | ✅ native | ❌ | ❌ | ❌ |
+| PostToolUse learning | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Security levels | tolerant/normal | single | single | multi-tier | tolerant/normal | single |
+| Audit log | ✅ JSONL | ❌ | ❌ | ❌ | ❌ | ✅ HMAC |
+| Custom LLM prompt | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Install | marketplace | npm -g | cargo/pip | npm -g | npm -g | brew |
+| Platform | all | all | all | all | all | macOS |
+
+**What makes safe-yes different**:
+
+- **Yes-only accelerator** — The only tool that never blocks. At worst it passes through to the native dialog. You can never lose a manual approval opportunity due to a misjudgment
+- **Learns from your behavior** — The only solution using both PreToolUse + PostToolUse hooks. When you manually approve a command, it's remembered for next time
+- **Context-aware validators** — The only regex-based solution with validator functions: `git push` auto-allowed, `git push --force main` escalated to LLM
+- **Auto-promotion** — Commands hit 5 memory matches get promoted to project rules, skipping memory and LLM layers entirely
+
+For AST-level parsing precision (distinguishing `echo "rm -rf /"` from `bash -c "rm -rf /")`, check out [dippy](https://github.com/hesreallyhim/awesome-claude-code/issues/442) and [rippy](https://github.com/mpecan/rippy). For macOS system-level interception + AI tamper resistance, see [omamori](https://github.com/yottayoshida/omamori). For dual LLM deep review, see [vibesafu](https://www.npmjs.com/package/vibesafu).
+
 ## Installation
 
 > **Important: you must run `/safe-yes:setup` after installation to activate.** The plugin installs in a disabled state so it never intercepts commands without your knowledge.
