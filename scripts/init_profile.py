@@ -6,10 +6,10 @@ Modes:
   --detect          Print detected settings as JSON (no writes)
   --apply <json>    Apply settings from JSON passed via stdin or env SAFE_YES_INIT
 
-Auto-detects project root and type.
-User choices (security_level, enabled, custom_prompt) are passed in via --apply.
+Project root is always the current working directory (Claude Code's cwd).
+project_type is auto-detected from markers in the project root.
 
-Hooks are now defined in the plugin's hooks/hooks.json and loaded automatically.
+Hooks are defined in the plugin's hooks/hooks.json and loaded automatically.
 setup only writes profile.json — no settings.local.json manipulation.
 """
 
@@ -24,25 +24,6 @@ if _script_dir not in sys.path:
     sys.path.insert(0, _script_dir)
 
 from config import _deep_merge
-
-
-def detect_project_root(start_path: str = ".") -> str:
-    markers = [
-        ".git", "package.json", "pyproject.toml", "Cargo.toml",
-        "go.mod", "pom.xml", "build.gradle", "Makefile", "CMakeLists.txt",
-        "setup.py", "setup.cfg", "composer.json",
-    ]
-    home = Path.home()
-    current = Path(start_path).resolve()
-    while True:
-        for marker in markers:
-            if (current / marker).exists():
-                return str(current)
-        # Stop walking at home or filesystem root — don't create profiles there
-        if current == home or current.parent == current:
-            break
-        current = current.parent
-    return str(Path(start_path).resolve())
 
 
 def detect_project_type(project_root: str) -> list:
@@ -85,9 +66,9 @@ def generate_profile(project_root: str, project_types: list,
 
 
 def cmd_detect(target_dir=None):
-    """Print detected settings as JSON. target_dir overrides start path."""
+    """Print detected settings as JSON. target_dir overrides project root."""
     start = target_dir or "."
-    project_root = detect_project_root(start)
+    project_root = str(Path(start).resolve())
     project_types = detect_project_type(project_root)
 
     result = {
@@ -109,7 +90,7 @@ def cmd_apply():
         print("ERROR: Invalid JSON input", file=sys.stderr)
         sys.exit(1)
 
-    project_root = config.get("project_root") or detect_project_root()
+    project_root = config.get("project_root") or str(Path.cwd().resolve())
     project_types = config.get("project_types") or detect_project_type(project_root)
     security_level = config.get("security_level", "normal")
     custom_prompt = config.get("custom_prompt", "")

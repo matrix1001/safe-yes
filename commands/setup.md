@@ -7,7 +7,17 @@ allowed-tools: Bash, Read, AskUserQuestion
 
 Creates `.claude/security/profile.json`. Hooks are shipped in the plugin's `hooks/hooks.json` and loaded automatically — no settings.local.json changes needed.
 
-## Step 1: Read Profile & Ask Questions
+## Step 1: Confirm Project Root
+
+Run `pwd` to get the current working directory. This is the project root where `.claude/security/profile.json` will be created. Claude Code's cwd IS the project root — do NOT walk up directories or try to auto-detect it. Just show it to the user:
+
+> Project root: `(pwd output)`
+>
+> Profile will be written to `.claude/security/profile.json` here.
+
+No need to ask for confirmation — Claude Code always sets cwd correctly.
+
+## Step 2: Read Profile & Ask Questions
 
 Read `./.claude/security/profile.json` to check for existing config.
 
@@ -32,10 +42,10 @@ If user picks `quit` on any question, stop.
 
 **Constraints**: each question MUST have >=2 options in the `options` array. "quit" always counts. For the Custom question: when no existing profile, use `["none", "quit"]`; when existing has custom_prompt, use `["none", "keep current", "quit"]`. Users can always type a custom value via the "Other" input — never add "custom text" as a literal option.
 
-## Step 2: Apply & Done
+## Step 3: Apply & Done
 
 ```bash
-echo '{"security_level":"<level>","custom_prompt":"<prompt>","enabled":<true|false>}' | python ${CLAUDE_PLUGIN_ROOT}/scripts/init_profile.py --apply
+echo '{"project_root":"(pwd)","security_level":"<level>","custom_prompt":"<prompt>","enabled":<true|false>}' | python ${CLAUDE_PLUGIN_ROOT}/scripts/init_profile.py --apply
 ```
 
 Then:

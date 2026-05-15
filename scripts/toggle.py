@@ -12,22 +12,8 @@ if _script_dir not in sys.path:
 from config import DEFAULT_PROFILE
 
 
-def _find_profile(cwd: Path) -> Path:
-    """Find project-level profile.json, walking up from cwd."""
-    current = cwd.resolve()
-    while True:
-        candidate = current / ".claude" / "security" / "profile.json"
-        if candidate.exists():
-            return candidate
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return cwd.resolve() / ".claude" / "security" / "profile.json"
-
-
 def toggle(enable: bool, cwd: Path):
-    profile_path = _find_profile(cwd)
+    profile_path = cwd.resolve() / ".claude" / "security" / "profile.json"
 
     if profile_path.exists():
         try:
