@@ -26,10 +26,11 @@ Ask using AskUserQuestion (all questions together):
 **Custom prompt** (header: "Custom"):
 - `none` — Use default safety rules, no custom prompt
 - `keep current` — (only if existing profile has a custom_prompt) Keep it unchanged
-- Any other text the user types will be used as the new custom prompt
 - `quit` — Exit without changes
 
 If user picks `quit` on any question, stop.
+
+**Constraints**: each question MUST have >=2 options in the `options` array. "quit" always counts. For the Custom question: when no existing profile, use `["none", "quit"]`; when existing has custom_prompt, use `["none", "keep current", "quit"]`. Users can always type a custom value via the "Other" input — never add "custom text" as a literal option.
 
 ## Step 2: Apply & Done
 
