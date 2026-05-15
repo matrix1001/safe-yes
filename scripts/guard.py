@@ -194,7 +194,7 @@ def main():
         profile = load_profile(cwd)
 
         # Disabled via profile toggle — pass everything through
-        if profile and not profile.get("enabled", True):
+        if profile and not profile.get("enabled", False):
             print(json.dumps({"continue": True}))
             return
 

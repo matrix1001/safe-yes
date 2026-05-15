@@ -18,6 +18,13 @@ import os
 import sys
 from pathlib import Path
 
+# Allow importing from sibling scripts
+_script_dir = str(Path(__file__).resolve().parent)
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
+from config import _deep_merge
+
 
 def detect_project_root(start_path: str = ".") -> str:
     markers = [
@@ -59,6 +66,9 @@ def generate_profile(project_root: str, project_types: list,
                      security_level: str = "normal",
                      custom_prompt: str = "",
                      enabled: bool = True) -> dict:
+    """Build a minimal profile with only the user's explicit setup choices.
+    Other sections (memory, audit, custom_rules, etc.) are left out so
+    deep_merge preserves any existing customizations from a prior profile."""
     return {
         "version": 2,
         "enabled": enabled,
@@ -70,18 +80,6 @@ def generate_profile(project_root: str, project_types: list,
             "enabled": True,
             "custom_prompt": custom_prompt,
         },
-        "memory": {
-            "enabled": True,
-            "max_entries": 5000,
-            "ttl_days": 30,
-            "similarity_threshold": 0.8,
-        },
-        "audit": {
-            "central_log": False,
-            "central_log_path": "",
-        },
-        "custom_rules": [],
-        "network_allowed_domains": [],
     }
 
 
@@ -121,20 +119,14 @@ def cmd_apply():
     profile_path = security_dir / "profile.json"
 
     if profile_path.exists():
-        # Merge with existing — preserve user customizations
+        # Deep merge: existing customizations preserved, new choices override
         try:
             existing = json.loads(profile_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             existing = {}
         new_profile = generate_profile(project_root, project_types, security_level, custom_prompt, enabled)
-        # Don't overwrite custom_rules or llm settings user may have added
-        if "custom_rules" in existing and existing["custom_rules"]:
-            new_profile["custom_rules"] = existing["custom_rules"]
-        if "llm" in existing and existing.get("llm", {}).get("api_key"):
-            new_profile["llm"]["api_key"] = existing["llm"]["api_key"]
-        if "llm" in existing and existing.get("llm", {}).get("model"):
-            new_profile["llm"]["model"] = existing["llm"]["model"]
-        profile = new_profile
+        # existing as base, new on top → new choices win for enabled/level/prompt
+        profile = _deep_merge(existing, new_profile)
     else:
         profile = generate_profile(project_root, project_types, security_level, custom_prompt, enabled)
 

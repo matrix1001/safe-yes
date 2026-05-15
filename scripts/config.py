@@ -1,4 +1,4 @@
-"""Safe-Yes config — load profile.json with v2 migration, deep merge, and caching.
+"""Safe-Yes config — load project-level profile.json with v2 migration and caching.
 
 LLM credentials auto-resolve from Claude Code's ANTHROPIC_AUTH_TOKEN
 and ANTHROPIC_BASE_URL env vars if not explicitly set in profile.
@@ -34,7 +34,7 @@ DEFAULT_PROFILE = {
     },
 }
 
-# Module-level cache indexed by (path, mtime) tuples of all loaded profile files.
+# Module-level cache indexed by (cwd_path, profile_path, mtime) tuple.
 # Each guard.py invocation is a fresh process so there is normally only one call
 # to load_profile() per run; the cache pays off in test suites and when guard.py
 # is imported as a library for batch analysis.
@@ -79,44 +79,41 @@ def _migrate_v1(profile: dict) -> dict:
 
 
 def load_profile(cwd: str) -> dict:
-    """Load merged profile: user-level as base, project-level overrides.
+    """Load project-level profile, merged with hardcoded defaults.
 
-    Search order:
-      1. User-level ~/.claude/security/profile.json — base defaults
-      2. Project-level .claude/security/profile.json — overrides on top
+    Only reads .claude/security/profile.json from the project root.
+    Global ~/.claude/security/profile.json is deliberately ignored —
+    safe-yes is a per-project opt-in tool.
 
-    Deep-merge means LLM config from user-level flows into all projects.
-    Cached by (project_path, user_path) + mtime to avoid repeated disk I/O.
+    Cached by (cwd_path, profile_path, mtime) to avoid repeated disk I/O.
     """
     global _cache
     cwd_path = Path(cwd).resolve()
+    profile_path = cwd_path / ".claude" / "security" / "profile.json"
 
-    user_path = Path.home() / ".claude" / "security" / "profile.json"
-    project_path = cwd_path / ".claude" / "security" / "profile.json"
-
-    # Determine effective paths
-    paths = []
-    if user_path.exists():
-        paths.append(user_path)
-    if project_path.exists() and project_path != user_path:
-        paths.append(project_path)
-
-    # Build cache key from all paths + their mtimes
+    # Build cache key from cwd + profile path + mtime
     cache_key = None
-    if paths:
+    if profile_path.exists():
         try:
-            key_parts = []
-            for p in paths:
-                key_parts.append((str(p), p.stat().st_mtime))
-            cache_key = tuple(key_parts)
+            cache_key = (str(cwd_path), str(profile_path), profile_path.stat().st_mtime)
         except OSError:
             pass
 
     if cache_key and _cache.get("key") == cache_key:
         return _cache["profile"]
 
-    # Load and merge
-    profile = _load_merged(paths, cwd_path)
+    # Load: DEFAULT_PROFILE as base, project-level on top
+    profile = dict(DEFAULT_PROFILE)
+    if profile_path.exists():
+        try:
+            overlay = json.loads(profile_path.read_text(encoding='utf-8'))
+            overlay = _migrate_v1(overlay)
+            profile = _deep_merge(profile, overlay)
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    if not profile.get("project_root"):
+        profile["project_root"] = str(cwd_path)
 
     if cache_key:
         _cache["profile"] = profile
@@ -134,24 +131,6 @@ def _deep_merge(base: dict, override: dict) -> dict:
         else:
             result[key] = val
     return result
-
-
-def _load_merged(paths, cwd_path: Path) -> dict:
-    """Load base (user) and overlay (project), deep-merging in order."""
-    profile = dict(DEFAULT_PROFILE)
-
-    for p in paths:
-        try:
-            overlay = json.loads(p.read_text(encoding='utf-8'))
-            overlay = _migrate_v1(overlay)
-            profile = _deep_merge(profile, overlay)
-        except (json.JSONDecodeError, OSError):
-            pass
-
-    if not profile.get("project_root"):
-        profile["project_root"] = str(cwd_path)
-
-    return profile
 
 
 def is_llm_configured(profile: dict) -> bool:

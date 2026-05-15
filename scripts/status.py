@@ -2,9 +2,16 @@
 """Safe-Yes status check — hook state, profile, decision stats, memory stats."""
 
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
+
+_script_dir = str(Path(__file__).resolve().parent)
+if _script_dir not in sys.path:
+    sys.path.insert(0, _script_dir)
+
+from config import load_profile
 
 
 def status(tail=None):
@@ -16,22 +23,16 @@ def status(tail=None):
     plugin_hooks = Path(__file__).resolve().parent.parent / "hooks" / "hooks.json"
     out["hook_active"] = plugin_hooks.exists()
 
-    # ── Profile ──
+    # ── Profile (via load_profile — same merge logic as guard.py) ──
     profile_path = cwd / ".claude" / "security" / "profile.json"
-    if profile_path.exists():
-        try:
-            p = json.loads(profile_path.read_text(encoding="utf-8"))
-            out["profile_exists"] = True
-            out["enabled"] = p.get("enabled", True)
-            out["security_level"] = p.get("security_level", "normal")
-            out["llm_enabled"] = p.get("llm", {}).get("enabled", False)
-            out["memory_enabled"] = p.get("memory", {}).get("enabled", True)
-            out["custom_rules"] = len(p.get("custom_rules", []))
-            out["project_types"] = p.get("project_types", ["generic"])
-        except (json.JSONDecodeError, OSError):
-            out["profile_exists"] = False
-    else:
-        out["profile_exists"] = False
+    out["profile_exists"] = profile_path.exists()
+    p = load_profile(str(cwd))
+    out["enabled"] = p.get("enabled", False)
+    out["security_level"] = p.get("security_level", "normal")
+    out["llm_enabled"] = p.get("llm", {}).get("enabled", False)
+    out["memory_enabled"] = p.get("memory", {}).get("enabled", True)
+    out["custom_rules"] = len(p.get("custom_rules", []))
+    out["project_types"] = p.get("project_types", ["generic"])
 
     # ── Decision stats ──
     log_path = cwd / ".claude" / "security" / "decisions.jsonl"
