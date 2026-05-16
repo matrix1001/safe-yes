@@ -7,8 +7,8 @@ from pathlib import Path
 # Pre-compiled regex patterns (module load time)
 _RE_MSYS_DRIVE = re.compile(r'^/([a-zA-Z])(?:/|$)(.*)')
 _RE_PATH_CANDIDATE = re.compile(r'(?:^|\s)((?:\.{0,2}/|[a-zA-Z]:[\\/])?[^\s|;&]+)')
-_RE_ABSOLUTE_PATH = re.compile(r'^(?:[a-zA-Z]:[\\/]|[a-zA-Z]:\\|/)')
-_RE_FLAG_LIKE = re.compile(r'^[-/][a-zA-Z]')
+_RE_ABSOLUTE_PATH = re.compile(r'^(?:[a-zA-Z]:[\\/]|[a-zA-Z]:\\|/|~)')
+_RE_FLAG_LIKE = re.compile(r'^-[a-zA-Z]+$|^/[a-zA-Z]$')
 _RE_RM_FLAG_RECURSIVE = re.compile(r'-[-\w]*r[-\w]*')
 _RE_RM_FLAG_FORCE = re.compile(r'-[-\w]*f[-\w]*')
 _RE_RM_ARGS = re.compile(r'\brm\b(.*)')
@@ -38,12 +38,14 @@ def _in_project(command, project_root):
     project_path = Path(_npath(project_root)).resolve()
     path_candidates = _RE_PATH_CANDIDATE.findall(command)
     for path_str in path_candidates:
-        if not _RE_ABSOLUTE_PATH.match(path_str):
-            continue  # skip relative paths and flags
-        # Skip flag-like patterns (e.g. -r, --force, /Q)
+        # Expand env vars ($HOME, $VAR) and tilde (~) before checking absoluteness
+        expanded = os.path.expandvars(os.path.expanduser(path_str))
+        if not _RE_ABSOLUTE_PATH.match(expanded):
+            continue  # relative paths (or unresolvable vars)
+        # Skip flag-like patterns (e.g. -r, -rf, /Q) — check original token
         if _RE_FLAG_LIKE.match(path_str.strip('\'"')):
             continue
-        clean = _npath(path_str.strip('\'"'))
+        clean = _npath(expanded.strip('\'"'))
         try:
             resolved = Path(clean).resolve(strict=False)
         except OSError:
